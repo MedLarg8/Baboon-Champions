@@ -1,7 +1,8 @@
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.models.match import MatchParticipant
 from app.models.friend import Friend
 from app.schemas.friend import FriendCreate
 from app.services.riot import RiotAccount, RiotAccountService
@@ -80,5 +81,10 @@ def delete_friend(db: Session, friend_id: int) -> None:
     if friend is None:
         raise FriendNotFoundError("Friend not found.")
 
+    db.execute(
+        update(MatchParticipant)
+        .where(MatchParticipant.friend_id == friend_id)
+        .values(friend_id=None),
+    )
     db.delete(friend)
     db.commit()

@@ -22,6 +22,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 def init_db() -> None:
     import app.models.friend  # noqa: F401
+    import app.models.match  # noqa: F401
 
     Base.metadata.create_all(bind=engine)
 

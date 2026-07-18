@@ -1,4 +1,10 @@
 import type { CreateFriendRequest, Friend } from "../types/friend";
+import type {
+  CurrentBaboonResponse,
+  MatchDetail,
+  MatchSummary,
+  MatchSyncSummary,
+} from "../types/match";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(
   /\/$/,
@@ -18,13 +24,18 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...init?.headers,
-    },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...init?.headers,
+      },
+    });
+  } catch (error) {
+    throw new ApiError("Backend unavailable. Make sure the API is running.", 0);
+  }
 
   if (!response.ok) {
     const detail = await parseErrorDetail(response);
@@ -64,4 +75,23 @@ export const friendApi = {
     request<{ detail: string }>(`/api/friends/${friendId}`, {
       method: "DELETE",
     }),
+};
+
+export const matchApi = {
+  listMatches: ({ limit = 20, offset = 0 }: { limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    });
+    return request<MatchSummary[]>(`/api/matches?${params.toString()}`);
+  },
+  getMatch: (matchId: number) => request<MatchDetail>(`/api/matches/${matchId}`),
+  syncMatches: () =>
+    request<MatchSyncSummary>("/api/matches/sync", {
+      method: "POST",
+    }),
+};
+
+export const baboonApi = {
+  getCurrentBaboon: () => request<CurrentBaboonResponse>("/api/baboon/current"),
 };

@@ -4,6 +4,7 @@ import { AlertCircle, CheckCircle2, Loader2, Plus, Trash2, UserPlus, Users } fro
 
 import { ApiError, friendApi } from "../api/client";
 import type { CreateFriendRequest, Friend } from "../types/friend";
+import { formatDate } from "../utils/format";
 
 type FormState = CreateFriendRequest;
 
@@ -249,12 +250,4 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Something went wrong.";
-}
-
-function formatDate(value: string): string {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(value));
 }

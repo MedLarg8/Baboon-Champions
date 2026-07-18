@@ -1,4 +1,4 @@
-import { Crown, Home, Users } from "lucide-react";
+import { Crown, History, Home, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 export function AppShell() {
@@ -23,6 +23,10 @@ export function AppShell() {
           <NavLink to="/friends" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <Users size={18} aria-hidden="true" />
             <span>Friends</span>
+          </NavLink>
+          <NavLink to="/matches" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <History size={18} aria-hidden="true" />
+            <span>Match History</span>
           </NavLink>
         </nav>
       </header>

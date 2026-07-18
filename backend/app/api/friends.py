@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.api.dependencies import get_riot_account_service
+from app.api.errors import riot_http_exception
 from app.database.session import get_db
 from app.schemas.friend import FriendCreate, FriendRead
 from app.services.friends import (
@@ -35,7 +36,7 @@ async def register_friend(
             detail=str(exc),
         ) from exc
     except RiotApiError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
+        raise riot_http_exception(exc) from exc
 
 
 @router.delete("/{friend_id}", status_code=status.HTTP_200_OK)
