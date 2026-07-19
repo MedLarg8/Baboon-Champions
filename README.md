@@ -5,7 +5,7 @@ A personal web application for a friend group that plays League of Legends ARAM:
 ## Current Batch 2 Capabilities
 
 - FastAPI backend with SQLite persistence.
-- Riot Account-V1 friend registration by Riot ID.
+- Riot Account-V1 friend registration by Riot ID from the `/friends` page.
 - Riot Match-v5 manual match synchronization.
 - ARAM: Mayhem filtering for queue `2400`.
 - Baboon and Co-Baboon calculation from champion damage only.
@@ -13,6 +13,22 @@ A personal web application for a friend group that plays League of Legends ARAM:
 - Current Baboon derived from the newest imported eligible match.
 - React/Vite frontend with dashboard, friends, match history, and match detail routes.
 - Backend tests with mocked Riot responses and isolated test databases.
+
+## Friend Accounts
+
+Friend accounts are managed from the `/friends` page. Add a friendly display name and a Riot ID in this format:
+
+```text
+GameName#TagLine
+```
+
+The frontend splits the Riot ID on the final `#` character, so game names with spaces are supported. The backend resolves the Riot ID through Riot Account-V1 and stores the Riot-provided PUUID plus canonical `gameName` and `tagLine` in SQLite.
+
+Users never enter PUUIDs manually. PUUIDs are treated as internal identifiers and are not shown prominently in the interface.
+
+Registered friends in SQLite are the source of truth for the friend group. Static backend account lists are not used.
+
+At least two registered Riot accounts are required before shared-match synchronization can produce a Baboon result.
 
 ## How Synchronization Works
 
@@ -90,13 +106,27 @@ Copy-Item .env.example .env
 
 Set `RIOT_API_KEY` in `backend/.env`. Keep this key backend-only. Never add it to the frontend or commit it.
 
-Run the backend:
+Run the backend on the standard local development port:
 
-```bash
-uvicorn app.main:app --reload
+```powershell
+python -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
-The API runs at `http://localhost:8000`.
+Using `python -m uvicorn` ensures Uvicorn is executed through the active Python environment.
+
+You can also run without activating the virtual environment:
+
+```powershell
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
+```
+
+Or use the helper script from the repository root:
+
+```powershell
+.\backend\run-dev.ps1
+```
+
+The API runs at `http://127.0.0.1:8001`.
 
 ## Frontend Setup
 
@@ -119,11 +149,41 @@ Copy-Item .env.example .env
 
 Run the frontend:
 
-```bash
+```powershell
 npm run dev
 ```
 
+Or use the helper script from the repository root:
+
+```powershell
+.\frontend\run-dev.ps1
+```
+
 The frontend runs at `http://localhost:5173`.
+
+## Running Both Apps
+
+Local development normally uses two processes:
+
+- Vite serves the React frontend.
+- FastAPI serves the backend API.
+- Browser requests to `/api/...` go to Vite first, then Vite proxies them to FastAPI at `http://127.0.0.1:8001`.
+
+Start both from the repository root:
+
+```powershell
+.\start-dev.ps1
+```
+
+Expected local addresses:
+
+```text
+Frontend: http://localhost:5173
+Backend:  http://127.0.0.1:8001
+Swagger:  http://127.0.0.1:8001/docs
+```
+
+Port `8001` is used because port `8000` may be unavailable or reserved on some Windows systems.
 
 ## Environment Variables
 
@@ -135,15 +195,18 @@ RIOT_REGIONAL_ROUTE=europe
 DATABASE_URL=sqlite:///./aram_baboon.db
 FRONTEND_ORIGIN=http://localhost:5173
 MATCH_LOOKBACK_PER_FRIEND=10
-MATCH_SYNC_CANDIDATE_LIMIT=30
+MATCH_SYNC_CANDIDATE_LIMIT=40
 MINIMUM_MATCH_DURATION_SECONDS=300
 ```
 
 Frontend:
 
 ```env
-VITE_API_BASE_URL=http://localhost:8000
+# Leave empty during local development to use the Vite /api proxy.
+VITE_API_BASE_URL=
 ```
+
+For a separately deployed backend, set a backend origin such as `VITE_API_BASE_URL=https://api.example.com`. Do not put Riot API keys or other secrets in `VITE_` variables.
 
 `MATCH_LOOKBACK_PER_FRIEND` controls how many recent queue `2400` IDs are requested per friend. `MATCH_SYNC_CANDIDATE_LIMIT` caps full match-detail fetches per sync so the frontend cannot trigger unbounded Riot requests.
 
@@ -155,6 +218,16 @@ VITE_API_BASE_URL=http://localhost:8000
 4. Restart the backend after changing the key.
 
 The backend sends the key to Riot with the `X-Riot-Token` header. The frontend never receives or stores the key. If Riot returns `429`, the backend surfaces a rate-limit message and forwards `Retry-After` when Riot provides it.
+
+## Match Synchronization Rules
+
+Use **Check for new matches** on the dashboard to manually synchronize recent Riot Match-v5 history. The app requests queue `2400`, verifies the full match response is still queue `2400`, and rejects ordinary ARAM queue `450`.
+
+Only registered friends from SQLite are compared. Participants are matched by PUUID, random players are ignored, and random players are not stored.
+
+Eligible matches require at least two registered friends on the same team. The Baboon is the registered participant with the lowest `totalDamageDealtToChampions`. If several registered friends tie for the lowest champion damage, all tied players are Co-Baboons.
+
+Matches shorter than `MINIMUM_MATCH_DURATION_SECONDS` are skipped. Matches where a registered participant explicitly has `gameEndedInEarlySurrender=true` are treated as remakes or early endings and skipped.
 
 ## Database Notes
 
@@ -174,22 +247,22 @@ Deleting a friend removes that friend from future synchronization anchors, but a
 
 Backend tests:
 
-```bash
+```powershell
 cd backend
-pytest
+.\.venv\Scripts\python.exe -m pytest
 ```
 
 Frontend build and TypeScript check:
 
-```bash
+```powershell
 cd frontend
 npm run build
 ```
 
 Backend health check:
 
-```bash
-curl http://localhost:8000/api/health
+```powershell
+Invoke-RestMethod http://127.0.0.1:8001/api/health
 ```
 
 Expected response:

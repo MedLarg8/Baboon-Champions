@@ -5,7 +5,7 @@ from app.api.dependencies import get_riot_account_service
 from app.api.errors import riot_http_exception
 from app.core.config import Settings, get_settings
 from app.database.session import get_db
-from app.schemas.match import MatchDetail, MatchSummary, MatchSyncSummary
+from app.schemas.match import MatchDetail, MatchListResponse, MatchSyncSummary
 from app.services.matches import (
     MatchNotFoundError,
     get_imported_match,
@@ -29,12 +29,12 @@ async def sync_matches(
         raise riot_http_exception(exc) from exc
 
 
-@router.get("", response_model=list[MatchSummary])
+@router.get("", response_model=MatchListResponse)
 def read_matches(
     limit: int = Query(default=20, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-) -> list[MatchSummary]:
+) -> MatchListResponse:
     return list_imported_matches(db, limit=limit, offset=offset)
 
 

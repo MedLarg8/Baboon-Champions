@@ -15,9 +15,9 @@ export function MatchHistoryPage() {
     queryFn: () => matchApi.listMatches({ limit: PAGE_SIZE, offset }),
   });
 
-  const matches = matchesQuery.data ?? [];
+  const matches = matchesQuery.data?.items ?? [];
   const canGoBack = offset > 0;
-  const canGoForward = matches.length === PAGE_SIZE;
+  const canGoForward = matchesQuery.data ? offset + matches.length < matchesQuery.data.total : false;
 
   return (
     <div className="page matches-page">

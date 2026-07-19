@@ -29,6 +29,13 @@ export type MatchSummary = {
   baboons: MatchParticipant[];
 };
 
+export type PaginatedMatches = {
+  items: MatchSummary[];
+  limit: number;
+  offset: number;
+  total: number;
+};
+
 export type MatchDetail = {
   id: number;
   riot_match_id: string;
@@ -63,6 +70,7 @@ export type CurrentBaboonResponse = {
     id: number;
     riot_match_id: string;
     game_end_time: string;
+    duration_seconds: number;
   } | null;
   baboons: CurrentBaboonPlayer[];
 };
@@ -71,7 +79,7 @@ export type MatchSyncSummary = {
   status: string;
   friends_checked: number;
   candidate_match_ids: number;
-  new_candidates: number;
+  new_candidates_examined: number;
   matches_imported: number;
   matches_already_known: number;
   matches_skipped: number;

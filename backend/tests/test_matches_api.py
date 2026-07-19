@@ -5,11 +5,11 @@ from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.dependencies import get_riot_account_service
-from app.database.session import Base, get_db
+from app.database.session import Base, create_database_engine, get_db
 from app.main import create_app
 from app.models.friend import Friend
 from app.models.match import Match
@@ -25,6 +25,7 @@ class FakeRiotService:
             tag_line="EUW",
         )
         self.account_error: RiotApiError | None = None
+        self.match_ids_error: RiotApiError | None = None
         self.match_ids_by_puuid: dict[str, list[str]] = {}
         self.match_details_by_id: dict[str, dict[str, Any] | RiotApiError] = {}
         self.match_id_calls: list[tuple[str, int, int]] = []
@@ -44,9 +45,12 @@ class FakeRiotService:
         puuid: str,
         *,
         queue_id: int,
+        start: int = 0,
         count: int,
     ) -> list[str]:
         self.match_id_calls.append((puuid, queue_id, count))
+        if self.match_ids_error is not None:
+            raise self.match_ids_error
         return self.match_ids_by_puuid.get(puuid, [])
 
     async def get_match_details(self, match_id: str) -> dict[str, Any]:
@@ -65,9 +69,8 @@ def client(tmp_path) -> Generator[
 ]:
     app = create_app(initialize_database=False)
     db_path = tmp_path / "matches.db"
-    engine = create_engine(
+    engine = create_database_engine(
         f"sqlite:///{db_path.as_posix()}",
-        connect_args={"check_same_thread": False},
     )
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -259,11 +262,11 @@ def test_sync_deduplicates_imports_match_and_excludes_randoms(client) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["candidate_match_ids"] == 1
-    assert payload["new_candidates"] == 1
+    assert payload["new_candidates_examined"] == 1
     assert payload["matches_imported"] == 1
     assert riot_service.match_detail_calls == ["EUW1_123"]
 
-    match_response = test_client.get("/api/matches").json()[0]
+    match_response = test_client.get("/api/matches").json()["items"][0]
     assert match_response["registered_friend_count"] == 2
     assert {participant["display_name"] for participant in match_response["participants"]} == {
         "Mohamed",
@@ -285,19 +288,85 @@ def test_sync_ignores_already_imported_match_ids_and_is_idempotent(client) -> No
     assert second_response.json()["matches_imported"] == 0
     assert second_response.json()["matches_already_known"] == 1
     assert riot_service.match_detail_calls == ["EUW1_123"]
-    assert len(test_client.get("/api/matches").json()) == 1
+    assert len(test_client.get("/api/matches").json()["items"]) == 1
 
 
-def test_sync_verifies_queue_id_after_fetching_detail(client) -> None:
+def test_sync_rejects_ordinary_aram_queue_after_fetching_detail(client) -> None:
     test_client, riot_service, session_factory = client
     add_default_friends(session_factory)
-    configure_match(riot_service, payload=match_payload("EUW1_123", queue_id=400))
+    configure_match(riot_service, payload=match_payload("EUW1_123", queue_id=450))
 
     response = test_client.post("/api/matches/sync")
 
     assert response.status_code == 200
     assert response.json()["matches_imported"] == 0
     assert response.json()["skipped_reasons"] == {"not_aram_mayhem": 1}
+
+
+def test_sync_missing_damage_value_skips_candidate(client) -> None:
+    test_client, riot_service, session_factory = client
+    add_default_friends(session_factory)
+    missing_damage_participant = participant_payload("friend-puuid-2", damage=9000)
+    del missing_damage_participant["totalDamageDealtToChampions"]
+    configure_match(
+        riot_service,
+        payload=match_payload(
+            "EUW1_missing_damage",
+            participants=[
+                participant_payload("friend-puuid-1", damage=10000),
+                missing_damage_participant,
+            ],
+        ),
+        match_id="EUW1_missing_damage",
+    )
+
+    response = test_client.post("/api/matches/sync")
+
+    assert response.json()["matches_imported"] == 0
+    assert response.json()["skipped_reasons"] == {"malformed_match": 1}
+    assert test_client.get("/api/matches").json()["items"] == []
+
+
+def test_sync_missing_optional_early_surrender_field_does_not_crash(client) -> None:
+    test_client, riot_service, session_factory = client
+    add_default_friends(session_factory)
+    first_participant = participant_payload("friend-puuid-1", damage=10000)
+    second_participant = participant_payload("friend-puuid-2", damage=9000)
+    del first_participant["gameEndedInEarlySurrender"]
+    del second_participant["gameEndedInEarlySurrender"]
+    configure_match(
+        riot_service,
+        payload=match_payload(
+            "EUW1_missing_surrender",
+            participants=[first_participant, second_participant],
+        ),
+        match_id="EUW1_missing_surrender",
+    )
+
+    response = test_client.post("/api/matches/sync")
+
+    assert response.json()["matches_imported"] == 1
+
+
+def test_sync_random_early_surrender_does_not_skip_registered_result(client) -> None:
+    test_client, riot_service, session_factory = client
+    add_default_friends(session_factory)
+    configure_match(
+        riot_service,
+        payload=match_payload(
+            "EUW1_random_surrender",
+            participants=[
+                participant_payload("friend-puuid-1", damage=10000),
+                participant_payload("friend-puuid-2", damage=9000),
+                participant_payload("random-puuid-1", damage=5000, early_surrender=True),
+            ],
+        ),
+        match_id="EUW1_random_surrender",
+    )
+
+    response = test_client.post("/api/matches/sync")
+
+    assert response.json()["matches_imported"] == 1
 
 
 def test_sync_requires_two_registered_friends_in_match(client) -> None:
@@ -317,7 +386,7 @@ def test_sync_requires_two_registered_friends_in_match(client) -> None:
     response = test_client.post("/api/matches/sync")
 
     assert response.json()["skipped_reasons"] == {"not_enough_registered_friends": 1}
-    assert test_client.get("/api/matches").json() == []
+    assert test_client.get("/api/matches").json()["items"] == []
 
 
 def test_sync_skips_registered_friends_on_different_teams(client) -> None:
@@ -387,6 +456,7 @@ def test_sync_marks_tied_co_baboons_and_current_returns_all(client) -> None:
     assert sync_response["matches_imported"] == 1
     assert len(sync_response["current_baboons"]) == 2
     assert current_response["has_current_baboon"] is True
+    assert current_response["match"]["duration_seconds"] == 1200
     assert {baboon["display_name"] for baboon in current_response["baboons"]} == {
         "Mohamed",
         "Ahmed",
@@ -410,7 +480,7 @@ def test_sync_imports_multiple_matches_and_lists_newest_first(client) -> None:
 
     assert sync_response["matches_imported"] == 2
     assert sync_response["imported_match_ids"] == ["EUW1_old", "EUW1_new"]
-    assert [match["riot_match_id"] for match in matches_response] == ["EUW1_new", "EUW1_old"]
+    assert [match["riot_match_id"] for match in matches_response["items"]] == ["EUW1_new", "EUW1_old"]
 
 
 def test_match_list_applies_pagination(client) -> None:
@@ -430,7 +500,11 @@ def test_match_list_applies_pagination(client) -> None:
     response = test_client.get("/api/matches?limit=1&offset=1")
 
     assert response.status_code == 200
-    assert response.json()[0]["riot_match_id"] == "EUW1_2"
+    payload = response.json()
+    assert payload["limit"] == 1
+    assert payload["offset"] == 1
+    assert payload["total"] == 3
+    assert payload["items"][0]["riot_match_id"] == "EUW1_2"
 
 
 def test_match_detail_and_missing_match(client) -> None:
@@ -438,7 +512,7 @@ def test_match_detail_and_missing_match(client) -> None:
     add_default_friends(session_factory)
     configure_match(riot_service)
     test_client.post("/api/matches/sync")
-    match_id = test_client.get("/api/matches").json()[0]["id"]
+    match_id = test_client.get("/api/matches").json()["items"][0]["id"]
 
     detail_response = test_client.get(f"/api/matches/{match_id}")
     missing_response = test_client.get("/api/matches/999")
@@ -479,7 +553,7 @@ def test_sync_continues_past_malformed_candidate(client) -> None:
 
     assert response.json()["matches_imported"] == 1
     assert response.json()["skipped_reasons"] == {"malformed_match": 1}
-    assert test_client.get("/api/matches").json()[0]["riot_match_id"] == "EUW1_good"
+    assert test_client.get("/api/matches").json()["items"][0]["riot_match_id"] == "EUW1_good"
 
 
 def test_sync_rolls_back_partial_match_on_participant_conflict(client) -> None:
@@ -502,7 +576,7 @@ def test_sync_rolls_back_partial_match_on_participant_conflict(client) -> None:
 
     assert response.json()["matches_imported"] == 0
     assert response.json()["skipped_reasons"] == {"database_conflict": 1}
-    assert test_client.get("/api/matches").json() == []
+    assert test_client.get("/api/matches").json()["items"] == []
     with session_factory() as db:
         assert db.scalar(select(Match).where(Match.riot_match_id == "EUW1_duplicate")) is None
 
@@ -512,7 +586,7 @@ def test_friend_deletion_preserves_historical_match_snapshots(client) -> None:
     first_friend, _ = add_default_friends(session_factory)
     configure_match(riot_service)
     test_client.post("/api/matches/sync")
-    match_id = test_client.get("/api/matches").json()[0]["id"]
+    match_id = test_client.get("/api/matches").json()["items"][0]["id"]
 
     delete_response = test_client.delete(f"/api/friends/{first_friend.id}")
     detail_response = test_client.get(f"/api/matches/{match_id}").json()
@@ -548,6 +622,17 @@ def test_riot_rate_limit_from_sync_returns_retry_header(client) -> None:
     assert response.headers["retry-after"] == "7"
 
 
+def test_sync_with_missing_api_key_returns_clear_error(client) -> None:
+    test_client, riot_service, session_factory = client
+    add_default_friends(session_factory)
+    riot_service.match_ids_error = RiotApiError(503, "Riot API key is not configured.")
+
+    response = test_client.post("/api/matches/sync")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Riot API key is not configured."}
+
+
 def test_stored_match_timestamps_are_based_on_riot_end_time(client) -> None:
     test_client, riot_service, session_factory = client
     add_default_friends(session_factory)
@@ -555,7 +640,7 @@ def test_stored_match_timestamps_are_based_on_riot_end_time(client) -> None:
 
     test_client.post("/api/matches/sync")
 
-    game_end_time = test_client.get("/api/matches").json()[0]["game_end_time"]
+    game_end_time = test_client.get("/api/matches").json()["items"][0]["game_end_time"]
     expected = datetime.fromtimestamp(
         (1_784_385_000_000 + (1200 * 1000)) / 1000,
         tz=timezone.utc,

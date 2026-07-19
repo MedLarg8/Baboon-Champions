@@ -518,6 +518,33 @@ a {
   background: rgba(20, 28, 40, 0.92);
 }
 
+.friend-status-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 48px;
+  padding: 10px 14px;
+  border: 1px solid rgba(52, 65, 82, 0.9);
+  border-radius: 8px;
+  color: var(--muted);
+  background: rgba(20, 28, 40, 0.78);
+}
+
+.friend-status-row span {
+  font-weight: 800;
+}
+
+.friend-status-row a {
+  color: var(--teal);
+  font-weight: 800;
+  text-align: right;
+}
+
+.status-inline-error {
+  color: #ffb7ac;
+}
+
 .current-baboon-zone {
   display: grid;
   gap: 18px;
@@ -892,9 +919,14 @@ a {
   }
 
   .match-card-main,
-  .no-history-panel {
+  .no-history-panel,
+  .friend-status-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .friend-status-row a {
+    text-align: left;
   }
 
   .match-metrics,

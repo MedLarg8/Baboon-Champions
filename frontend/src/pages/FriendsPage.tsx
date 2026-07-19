@@ -3,15 +3,17 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, CheckCircle2, Loader2, Plus, Trash2, UserPlus, Users } from "lucide-react";
 
 import { ApiError, friendApi } from "../api/client";
-import type { CreateFriendRequest, Friend } from "../types/friend";
+import type { Friend } from "../types/friend";
 import { formatDate } from "../utils/format";
 
-type FormState = CreateFriendRequest;
+type FormState = {
+  display_name: string;
+  riot_id: string;
+};
 
 const initialFormState: FormState = {
   display_name: "",
-  game_name: "",
-  tag_line: "",
+  riot_id: "",
 };
 
 export function FriendsPage() {
@@ -54,11 +56,9 @@ export function FriendsPage() {
     if (!formState.display_name.trim()) {
       return "Friendly display name is required.";
     }
-    if (!formState.game_name.trim()) {
-      return "Riot game name is required.";
-    }
-    if (!formState.tag_line.trim()) {
-      return "Riot tag line is required.";
+    const parsedRiotId = parseRiotId(formState.riot_id);
+    if (!parsedRiotId.ok) {
+      return parsedRiotId.message;
     }
     return null;
   }, [formState]);
@@ -71,10 +71,21 @@ export function FriendsPage() {
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    const trimmedPayload = {
+    const parsedRiotId = parseRiotId(formState.riot_id);
+
+    if (!formState.display_name.trim()) {
+      setFormError("Friendly display name is required.");
+      return;
+    }
+    if (!parsedRiotId.ok) {
+      setFormError(parsedRiotId.message);
+      return;
+    }
+
+    const payload = {
       display_name: formState.display_name.trim(),
-      game_name: formState.game_name.trim(),
-      tag_line: formState.tag_line.trim(),
+      game_name: parsedRiotId.gameName,
+      tag_line: parsedRiotId.tagLine,
     };
 
     if (validationError) {
@@ -82,7 +93,7 @@ export function FriendsPage() {
       return;
     }
 
-    createFriendMutation.mutate(trimmedPayload);
+    createFriendMutation.mutate(payload);
   }
 
   function handleDelete(friend: Friend) {
@@ -123,31 +134,16 @@ export function FriendsPage() {
               />
             </label>
 
-            <div className="riot-id-row">
-              <label>
-                <span>Riot game name</span>
-                <input
-                  value={formState.game_name}
-                  onChange={(event) => updateField("game_name", event.target.value)}
-                  placeholder="Windshitter"
-                  autoComplete="off"
-                  disabled={submitDisabled}
-                />
-              </label>
-              <span className="riot-separator" aria-hidden="true">
-                #
-              </span>
-              <label>
-                <span>Tag line</span>
-                <input
-                  value={formState.tag_line}
-                  onChange={(event) => updateField("tag_line", event.target.value)}
-                  placeholder="EUW"
-                  autoComplete="off"
-                  disabled={submitDisabled}
-                />
-              </label>
-            </div>
+            <label>
+              <span>Riot ID</span>
+              <input
+                value={formState.riot_id}
+                onChange={(event) => updateField("riot_id", event.target.value)}
+                placeholder="GameName#TagLine"
+                autoComplete="off"
+                disabled={submitDisabled}
+              />
+            </label>
 
             {formError ? (
               <StatusMessage tone="error" message={formError} />
@@ -184,7 +180,10 @@ export function FriendsPage() {
             <ListState tone="error" message={getErrorMessage(deleteFriendMutation.error)} />
           ) : null}
           {friendsQuery.isSuccess && friendsQuery.data.length === 0 ? (
-            <ListState tone="empty" message="No friends registered yet." />
+            <ListState
+              tone="empty"
+              message="No accounts have been registered yet. Add the Riot IDs of the friends who should be included in the Baboon competition."
+            />
           ) : null}
 
           {friendsQuery.isSuccess && friendsQuery.data.length > 0 ? (
@@ -250,4 +249,32 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
   return "Something went wrong.";
+}
+
+type ParsedRiotId =
+  | { ok: true; gameName: string; tagLine: string }
+  | { ok: false; message: string };
+
+function parseRiotId(value: string): ParsedRiotId {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return { ok: false, message: "Riot ID is required." };
+  }
+
+  const separatorIndex = trimmedValue.lastIndexOf("#");
+  if (separatorIndex === -1) {
+    return { ok: false, message: "Riot ID must include #, like GameName#TagLine." };
+  }
+
+  const gameName = trimmedValue.slice(0, separatorIndex).trim();
+  const tagLine = trimmedValue.slice(separatorIndex + 1).trim();
+
+  if (!gameName) {
+    return { ok: false, message: "Riot ID must include a game name before #." };
+  }
+  if (!tagLine) {
+    return { ok: false, message: "Riot ID must include a tag line after #." };
+  }
+
+  return { ok: true, gameName, tagLine };
 }

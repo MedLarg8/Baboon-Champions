@@ -34,6 +34,13 @@ class MatchSummary(BaseModel):
     baboons: list[MatchParticipantRead]
 
 
+class MatchListResponse(BaseModel):
+    items: list[MatchSummary]
+    limit: int
+    offset: int
+    total: int
+
+
 class MatchDetail(BaseModel):
     id: int
     riot_match_id: str
@@ -52,6 +59,7 @@ class CurrentBaboonMatch(BaseModel):
     id: int
     riot_match_id: str
     game_end_time: datetime
+    duration_seconds: int
 
 
 class CurrentBaboonPlayer(BaseModel):
@@ -83,7 +91,7 @@ class MatchSyncSummary(BaseModel):
     status: str
     friends_checked: int
     candidate_match_ids: int
-    new_candidates: int
+    new_candidates_examined: int
     matches_imported: int
     matches_already_known: int
     matches_skipped: int

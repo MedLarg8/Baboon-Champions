@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Crown, History, Loader2, RefreshCw, Trophy } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { ApiError, baboonApi, matchApi } from "../api/client";
+import { ApiError, baboonApi, friendApi, matchApi } from "../api/client";
 import { MatchParticipantsTable } from "../components/MatchParticipantsTable";
 import type { MatchSyncSummary } from "../types/match";
 import {
@@ -23,6 +23,10 @@ export function DashboardPage() {
     queryKey: ["matches", { limit: 1, offset: 0 }],
     queryFn: () => matchApi.listMatches({ limit: 1, offset: 0 }),
   });
+  const friendsQuery = useQuery({
+    queryKey: ["friends"],
+    queryFn: friendApi.listFriends,
+  });
 
   const syncMutation = useMutation({
     mutationFn: matchApi.syncMatches,
@@ -33,8 +37,11 @@ export function DashboardPage() {
   });
 
   const current = currentBaboonQuery.data;
-  const latestMatch = latestMatchesQuery.data?.[0];
+  const latestMatch = latestMatchesQuery.data?.items[0];
   const hasCoBaboons = (current?.baboons.length ?? 0) > 1;
+  const registeredFriendCount = friendsQuery.data?.length ?? 0;
+  const hasEnoughFriends = registeredFriendCount >= 2;
+  const syncDisabled = syncMutation.isPending || friendsQuery.isLoading || !hasEnoughFriends;
 
   return (
     <div className="page dashboard-page">
@@ -49,7 +56,12 @@ export function DashboardPage() {
           className="sync-button"
           type="button"
           onClick={() => syncMutation.mutate()}
-          disabled={syncMutation.isPending}
+          disabled={syncDisabled}
+          title={
+            hasEnoughFriends
+              ? "Check recent Riot matches"
+              : "Register at least two Riot accounts before checking for shared matches."
+          }
         >
           {syncMutation.isPending ? (
             <Loader2 className="spin" size={19} aria-hidden="true" />
@@ -58,6 +70,14 @@ export function DashboardPage() {
           )}
           <span>{syncMutation.isPending ? "Checking Riot match history..." : "Check for new matches"}</span>
         </button>
+      </section>
+
+      <section className="friend-status-row">
+        <span>{friendsQuery.isLoading ? "Loading registered friends..." : `${registeredFriendCount} registered friend${registeredFriendCount === 1 ? "" : "s"}`}</span>
+        {!friendsQuery.isLoading && !hasEnoughFriends ? (
+          <Link to="/friends">Register at least two Riot accounts before checking for shared matches.</Link>
+        ) : null}
+        {friendsQuery.isError ? <span className="status-inline-error">{getErrorMessage(friendsQuery.error)}</span> : null}
       </section>
 
       {syncMutation.data ? <SyncSummary summary={syncMutation.data} /> : null}
@@ -75,7 +95,7 @@ export function DashboardPage() {
             <div>
               <h2>No Baboon has been crowned yet.</h2>
               <p>
-                Register at least two friends, play an ARAM: Mayhem match together, then sync the latest games.
+                Register at least two friends, play an ARAM: Mayhem match together, then check for new matches.
               </p>
             </div>
           </section>

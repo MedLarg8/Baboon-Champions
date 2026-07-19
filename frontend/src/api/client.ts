@@ -2,11 +2,11 @@ import type { CreateFriendRequest, Friend } from "../types/friend";
 import type {
   CurrentBaboonResponse,
   MatchDetail,
-  MatchSummary,
+  PaginatedMatches,
   MatchSyncSummary,
 } from "../types/match";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000").replace(
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL?.trim() ?? "").replace(
   /\/$/,
   "",
 );
@@ -26,7 +26,7 @@ export class ApiError extends Error {
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${API_BASE_URL}${path}`, {
+    response = await fetch(buildApiUrl(path), {
       ...init,
       headers: {
         "Content-Type": "application/json",
@@ -43,6 +43,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
 
   return (await response.json()) as T;
+}
+
+function buildApiUrl(path: string): string {
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  return `${API_BASE_URL}${normalizedPath}`;
 }
 
 async function parseErrorDetail(response: Response): Promise<string> {
@@ -83,7 +88,7 @@ export const matchApi = {
       limit: String(limit),
       offset: String(offset),
     });
-    return request<MatchSummary[]>(`/api/matches?${params.toString()}`);
+    return request<PaginatedMatches>(`/api/matches?${params.toString()}`);
   },
   getMatch: (matchId: number) => request<MatchDetail>(`/api/matches/${matchId}`),
   syncMatches: () =>

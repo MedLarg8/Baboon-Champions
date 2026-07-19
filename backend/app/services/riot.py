@@ -81,8 +81,11 @@ class RiotAccountService:
         puuid: str,
         *,
         queue_id: int,
+        start: int = 0,
         count: int,
     ) -> list[str]:
+        safe_start = max(0, start)
+        safe_count = min(max(1, count), 100)
         encoded_puuid = quote(puuid, safe="")
         url = (
             f"https://{self._regional_route}.api.riotgames.com"
@@ -90,7 +93,7 @@ class RiotAccountService:
         )
         payload = await self._get_json(
             url,
-            params={"queue": str(queue_id), "start": "0", "count": str(count)},
+            params={"queue": str(queue_id), "start": str(safe_start), "count": str(safe_count)},
             not_found_detail="Riot match history not found.",
         )
         if not isinstance(payload, list) or not all(isinstance(match_id, str) for match_id in payload):
@@ -108,6 +111,11 @@ class RiotAccountService:
         )
         payload = await self._get_json(url, not_found_detail="Riot match not found.")
         if not isinstance(payload, dict):
+            raise RiotApiError(
+                status.HTTP_502_BAD_GATEWAY,
+                "Riot match response was malformed.",
+            )
+        if not isinstance(payload.get("metadata"), dict) or not isinstance(payload.get("info"), dict):
             raise RiotApiError(
                 status.HTTP_502_BAD_GATEWAY,
                 "Riot match response was malformed.",

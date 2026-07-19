@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
@@ -17,6 +17,7 @@ from app.schemas.match import (
     CurrentBaboonPlayer,
     CurrentBaboonResponse,
     MatchDetail,
+    MatchListResponse,
     MatchParticipantRead,
     MatchSummary,
     MatchSyncSummary,
@@ -75,7 +76,7 @@ async def synchronize_matches(
             status="not_enough_friends",
             friends_checked=len(friends),
             candidate_match_ids=0,
-            new_candidates=0,
+            new_candidates_examined=0,
             matches_already_known=0,
             imported_match_ids=imported_match_ids,
             skipped_reasons=skipped_reasons,
@@ -139,14 +140,15 @@ async def synchronize_matches(
         status=status,
         friends_checked=len(friends),
         candidate_match_ids=len(candidate_match_ids),
-        new_candidates=len(new_candidate_match_ids),
+        new_candidates_examined=len(new_candidate_match_ids),
         matches_already_known=len(already_known_match_ids),
         imported_match_ids=imported_match_ids,
         skipped_reasons=skipped_reasons,
     )
 
 
-def list_imported_matches(db: Session, *, limit: int, offset: int) -> list[MatchSummary]:
+def list_imported_matches(db: Session, *, limit: int, offset: int) -> MatchListResponse:
+    total = db.scalar(select(func.count()).select_from(Match)) or 0
     matches = db.scalars(
         select(Match)
         .options(selectinload(Match.participants))
@@ -154,7 +156,12 @@ def list_imported_matches(db: Session, *, limit: int, offset: int) -> list[Match
         .offset(offset)
         .limit(limit),
     ).all()
-    return [_to_match_summary(match) for match in matches]
+    return MatchListResponse(
+        items=[_to_match_summary(match) for match in matches],
+        limit=limit,
+        offset=offset,
+        total=total,
+    )
 
 
 def get_imported_match(db: Session, match_id: int) -> MatchDetail:
@@ -206,6 +213,7 @@ def get_current_baboon(db: Session) -> CurrentBaboonResponse:
             id=match.id,
             riot_match_id=match.riot_match_id,
             game_end_time=_ensure_utc(match.game_end_time),
+            duration_seconds=match.duration_seconds,
         ),
         baboons=baboons,
     )
@@ -277,20 +285,26 @@ def _build_import_candidate(
     if not isinstance(riot_participants, list):
         return None, "malformed_match"
 
-    registered_participants = [
-        _to_registered_participant(participant, friends_by_puuid)
-        for participant in riot_participants
-        if isinstance(participant, dict) and participant.get("puuid") in friends_by_puuid
-    ]
-    registered_participants = [
-        participant for participant in registered_participants if participant is not None
-    ]
+    registered_participants: list[ImportedParticipantCandidate] = []
+    for participant in riot_participants:
+        if not isinstance(participant, dict):
+            continue
+        if participant.get("puuid") not in friends_by_puuid:
+            continue
+        if _is_early_surrender(participant):
+            return None, "early_surrender_or_remake"
+
+        registered_participant, skipped_reason = _to_registered_participant(
+            participant,
+            friends_by_puuid,
+        )
+        if skipped_reason is not None:
+            return None, skipped_reason
+        if registered_participant is not None:
+            registered_participants.append(registered_participant)
 
     if len(registered_participants) < 2:
         return None, "not_enough_registered_friends"
-
-    if any(_is_early_surrender(participant) for participant in riot_participants if isinstance(participant, dict)):
-        return None, "early_surrender_or_remake"
 
     team_ids = {participant.team_id for participant in registered_participants}
     if len(team_ids) != 1:
@@ -339,29 +353,35 @@ def _build_import_candidate(
 def _to_registered_participant(
     participant: dict[str, Any],
     friends_by_puuid: dict[str, Friend],
-) -> ImportedParticipantCandidate | None:
+) -> tuple[ImportedParticipantCandidate | None, str | None]:
     puuid = participant.get("puuid")
     if not isinstance(puuid, str):
-        return None
+        return None, "malformed_match"
     friend = friends_by_puuid.get(puuid)
     if friend is None:
-        return None
+        return None, None
 
-    return ImportedParticipantCandidate(
-        friend=friend,
-        puuid=puuid,
-        champion_id=_read_optional_int(participant.get("championId")),
-        champion_name=_read_optional_string(participant.get("championName")),
-        team_id=_read_int(participant.get("teamId"), default=0),
-        kills=_read_int(participant.get("kills"), default=0),
-        deaths=_read_int(participant.get("deaths"), default=0),
-        assists=_read_int(participant.get("assists"), default=0),
-        damage_to_champions=max(
-            0,
-            _read_int(participant.get("totalDamageDealtToChampions"), default=0),
+    damage_to_champions = _read_required_non_negative_int(
+        participant.get("totalDamageDealtToChampions"),
+    )
+    if damage_to_champions is None:
+        return None, "malformed_match"
+
+    return (
+        ImportedParticipantCandidate(
+            friend=friend,
+            puuid=puuid,
+            champion_id=_read_optional_int(participant.get("championId")),
+            champion_name=_read_optional_string(participant.get("championName")),
+            team_id=_read_int(participant.get("teamId"), default=0),
+            kills=_read_int(participant.get("kills"), default=0),
+            deaths=_read_int(participant.get("deaths"), default=0),
+            assists=_read_int(participant.get("assists"), default=0),
+            damage_to_champions=damage_to_champions,
+            win=bool(participant.get("win", False)),
+            is_baboon=False,
         ),
-        win=bool(participant.get("win", False)),
-        is_baboon=False,
+        None,
     )
 
 
@@ -413,6 +433,13 @@ def _read_optional_int(value: Any) -> int | None:
         return None
 
 
+def _read_required_non_negative_int(value: Any) -> int | None:
+    parsed_value = _read_optional_int(value)
+    if parsed_value is None or parsed_value < 0:
+        return None
+    return parsed_value
+
+
 def _read_optional_string(value: Any) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -462,7 +489,7 @@ def _sync_summary(
     status: str,
     friends_checked: int,
     candidate_match_ids: int,
-    new_candidates: int,
+    new_candidates_examined: int,
     matches_already_known: int,
     imported_match_ids: list[str],
     skipped_reasons: Counter[str],
@@ -472,7 +499,7 @@ def _sync_summary(
         status=status,
         friends_checked=friends_checked,
         candidate_match_ids=candidate_match_ids,
-        new_candidates=new_candidates,
+        new_candidates_examined=new_candidates_examined,
         matches_imported=len(imported_match_ids),
         matches_already_known=matches_already_known,
         matches_skipped=sum(skipped_reasons.values()),

@@ -2,11 +2,10 @@ from collections.abc import Generator
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.dependencies import get_riot_account_service
-from app.database.session import Base, get_db
+from app.database.session import Base, create_database_engine, get_db
 from app.main import create_app
 from app.services.riot import RiotAccount, RiotApiError
 
@@ -23,12 +22,14 @@ class FakeRiotService:
             tag_line="EUW",
         )
         self.error = error
+        self.requests: list[tuple[str, str]] = []
 
     async def resolve_account_by_riot_id(
         self,
         game_name: str,
         tag_line: str,
     ) -> RiotAccount:
+        self.requests.append((game_name, tag_line))
         if self.error is not None:
             raise self.error
         return self.account
@@ -38,9 +39,8 @@ class FakeRiotService:
 def client(tmp_path) -> Generator[tuple[TestClient, dict[str, FakeRiotService]], None, None]:
     app = create_app(initialize_database=False)
     db_path = tmp_path / "test.db"
-    engine = create_engine(
+    engine = create_database_engine(
         f"sqlite:///{db_path.as_posix()}",
-        connect_args={"check_same_thread": False},
     )
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     Base.metadata.create_all(bind=engine)
@@ -97,6 +97,78 @@ def test_register_friend_success(client) -> None:
     assert "created_at" in payload
 
 
+def test_register_friend_stores_canonical_riot_id_and_puuid(client) -> None:
+    test_client, riot_state = client
+    riot_state["service"] = FakeRiotService(
+        account=RiotAccount(
+            puuid="canonical-puuid",
+            game_name="Canonical Name",
+            tag_line="EUW",
+        ),
+    )
+
+    response = test_client.post(
+        "/api/friends",
+        json={
+            "display_name": "Mo",
+            "game_name": "submitted name",
+            "tag_line": "euw",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["game_name"] == "Canonical Name"
+    assert response.json()["tag_line"] == "EUW"
+    assert response.json()["puuid"] == "canonical-puuid"
+
+
+def test_register_friend_supports_game_names_with_spaces(client) -> None:
+    test_client, riot_state = client
+    riot_state["service"] = FakeRiotService(
+        account=RiotAccount(
+            puuid="space-puuid",
+            game_name="My Player Name",
+            tag_line="EUW",
+        ),
+    )
+
+    response = test_client.post(
+        "/api/friends",
+        json={
+            "display_name": "Space Friend",
+            "game_name": " My Player Name ",
+            "tag_line": " EUW ",
+        },
+    )
+
+    assert response.status_code == 201
+    assert riot_state["service"].requests == [("My Player Name", "EUW")]
+    assert response.json()["game_name"] == "My Player Name"
+
+
+def test_register_friend_supports_unicode_game_names(client) -> None:
+    test_client, riot_state = client
+    riot_state["service"] = FakeRiotService(
+        account=RiotAccount(
+            puuid="unicode-puuid",
+            game_name="नामी Player",
+            tag_line="EUW",
+        ),
+    )
+
+    response = test_client.post(
+        "/api/friends",
+        json={
+            "display_name": "Unicode Friend",
+            "game_name": "नामी Player",
+            "tag_line": "EUW",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["game_name"] == "नामी Player"
+
+
 def test_register_friend_riot_account_not_found(client) -> None:
     test_client, riot_state = client
     riot_state["service"] = FakeRiotService(
@@ -125,6 +197,41 @@ def test_register_friend_invalid_or_expired_api_key(client) -> None:
 
     assert response.status_code == 502
     assert response.json() == {"detail": "Riot API key is invalid, missing, or expired."}
+
+
+def test_register_friend_riot_rate_limit(client) -> None:
+    test_client, riot_state = client
+    riot_state["service"] = FakeRiotService(
+        error=RiotApiError(
+            429,
+            "Riot API rate limit reached. Try again later. Riot asked clients to retry after 7 seconds.",
+            retry_after_seconds=7,
+        ),
+    )
+
+    response = test_client.post(
+        "/api/friends",
+        json={"display_name": "Mo", "game_name": "Windshitter", "tag_line": "EUW"},
+    )
+
+    assert response.status_code == 429
+    assert response.headers["retry-after"] == "7"
+    assert "rate limit" in response.json()["detail"]
+
+
+def test_register_friend_riot_timeout(client) -> None:
+    test_client, riot_state = client
+    riot_state["service"] = FakeRiotService(
+        error=RiotApiError(504, "Riot API request timed out. Try again later."),
+    )
+
+    response = test_client.post(
+        "/api/friends",
+        json={"display_name": "Mo", "game_name": "Windshitter", "tag_line": "EUW"},
+    )
+
+    assert response.status_code == 504
+    assert response.json() == {"detail": "Riot API request timed out. Try again later."}
 
 
 def test_duplicate_puuid_registration_returns_conflict(client) -> None:
