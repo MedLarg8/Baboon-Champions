@@ -1,10 +1,10 @@
 import type { CreateFriendRequest, Friend } from "../types/friend";
 import type {
+  CreateGameRequest,
   CurrentBaboonResponse,
-  MatchDetail,
-  PaginatedMatches,
-  MatchSyncSummary,
-} from "../types/match";
+  GameDetail,
+  PaginatedGames,
+} from "../types/game";
 
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL?.trim() ?? "").replace(
   /\/$/,
@@ -82,21 +82,27 @@ export const friendApi = {
     }),
 };
 
-export const matchApi = {
-  listMatches: ({ limit = 20, offset = 0 }: { limit?: number; offset?: number } = {}) => {
+export const gameApi = {
+  createGame: (payload: CreateGameRequest) =>
+    request<GameDetail>("/api/games", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  listGames: ({ limit = 20, offset = 0 }: { limit?: number; offset?: number } = {}) => {
     const params = new URLSearchParams({
       limit: String(limit),
       offset: String(offset),
     });
-    return request<PaginatedMatches>(`/api/matches?${params.toString()}`);
+    return request<PaginatedGames>(`/api/games?${params.toString()}`);
   },
-  getMatch: (matchId: number) => request<MatchDetail>(`/api/matches/${matchId}`),
-  syncMatches: () =>
-    request<MatchSyncSummary>("/api/matches/sync", {
-      method: "POST",
+  getGame: (gameId: number) => request<GameDetail>(`/api/games/${gameId}`),
+  deleteGame: (gameId: number) =>
+    request<{ detail: string }>(`/api/games/${gameId}`, {
+      method: "DELETE",
     }),
+  getCurrentBaboon: () => request<CurrentBaboonResponse>("/api/baboon/current"),
 };
 
 export const baboonApi = {
-  getCurrentBaboon: () => request<CurrentBaboonResponse>("/api/baboon/current"),
+  getCurrentBaboon: gameApi.getCurrentBaboon,
 };

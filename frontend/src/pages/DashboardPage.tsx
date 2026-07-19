@@ -1,87 +1,57 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, Crown, History, Loader2, RefreshCw, Trophy } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { AlertCircle, Crown, History, Loader2, Plus, Trophy } from "lucide-react";
 import { Link } from "react-router-dom";
 
-import { ApiError, baboonApi, friendApi, matchApi } from "../api/client";
-import { MatchParticipantsTable } from "../components/MatchParticipantsTable";
-import type { MatchSyncSummary } from "../types/match";
-import {
-  formatDateTime,
-  formatDuration,
-  formatKda,
-  formatNumber,
-  formatRiotId,
-} from "../utils/format";
+import { ApiError, baboonApi, friendApi, gameApi } from "../api/client";
+import { ChampionPortrait } from "../components/ChampionPortrait";
+import { GameParticipantsTable } from "../components/GameParticipantsTable";
+import { formatDateTime, formatNumber, formatRiotId } from "../utils/format";
 
 export function DashboardPage() {
-  const queryClient = useQueryClient();
   const currentBaboonQuery = useQuery({
     queryKey: ["currentBaboon"],
     queryFn: baboonApi.getCurrentBaboon,
   });
-  const latestMatchesQuery = useQuery({
-    queryKey: ["matches", { limit: 1, offset: 0 }],
-    queryFn: () => matchApi.listMatches({ limit: 1, offset: 0 }),
+  const latestGamesQuery = useQuery({
+    queryKey: ["games", { limit: 1, offset: 0 }],
+    queryFn: () => gameApi.listGames({ limit: 1, offset: 0 }),
   });
   const friendsQuery = useQuery({
     queryKey: ["friends"],
     queryFn: friendApi.listFriends,
   });
 
-  const syncMutation = useMutation({
-    mutationFn: matchApi.syncMatches,
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["currentBaboon"] });
-      void queryClient.invalidateQueries({ queryKey: ["matches"] });
-    },
-  });
-
   const current = currentBaboonQuery.data;
-  const latestMatch = latestMatchesQuery.data?.items[0];
+  const latestGame = latestGamesQuery.data?.items[0];
   const hasCoBaboons = (current?.baboons.length ?? 0) > 1;
   const registeredFriendCount = friendsQuery.data?.length ?? 0;
-  const hasEnoughFriends = registeredFriendCount >= 2;
-  const syncDisabled = syncMutation.isPending || friendsQuery.isLoading || !hasEnoughFriends;
 
   return (
     <div className="page dashboard-page">
       <section className="dashboard-topline">
         <div className="page-heading">
-          <p className="eyebrow">ARAM: Mayhem queue 2400</p>
+          <p className="eyebrow">Manual ARAM: Mayhem ledger</p>
           <h1>{hasCoBaboons ? "Current Co-Baboons" : "Current Baboon"}</h1>
-          <p>Manual sync checks recent Riot matches for registered friends and imports eligible shared games.</p>
+          <p>Record the roster, champions, and damage. The backend crowns the lowest damage automatically.</p>
         </div>
 
-        <button
-          className="sync-button"
-          type="button"
-          onClick={() => syncMutation.mutate()}
-          disabled={syncDisabled}
-          title={
-            hasEnoughFriends
-              ? "Check recent Riot matches"
-              : "Register at least two Riot accounts before checking for shared matches."
-          }
-        >
-          {syncMutation.isPending ? (
-            <Loader2 className="spin" size={19} aria-hidden="true" />
-          ) : (
-            <RefreshCw size={19} aria-hidden="true" />
-          )}
-          <span>{syncMutation.isPending ? "Checking Riot match history..." : "Check for new matches"}</span>
-        </button>
+        <Link className="primary-action dashboard-action" to="/games/new">
+          <Plus size={19} aria-hidden="true" />
+          <span>Record a game</span>
+        </Link>
       </section>
 
       <section className="friend-status-row">
-        <span>{friendsQuery.isLoading ? "Loading registered friends..." : `${registeredFriendCount} registered friend${registeredFriendCount === 1 ? "" : "s"}`}</span>
-        {!friendsQuery.isLoading && !hasEnoughFriends ? (
-          <Link to="/friends">Register at least two Riot accounts before checking for shared matches.</Link>
+        <span>
+          {friendsQuery.isLoading
+            ? "Loading registered friends..."
+            : `${registeredFriendCount} registered friend${registeredFriendCount === 1 ? "" : "s"}`}
+        </span>
+        {!friendsQuery.isLoading && registeredFriendCount < 2 ? (
+          <Link to="/friends">Register at least two friends before recording a game.</Link>
         ) : null}
         {friendsQuery.isError ? <span className="status-inline-error">{getErrorMessage(friendsQuery.error)}</span> : null}
       </section>
-
-      {syncMutation.data ? <SyncSummary summary={syncMutation.data} /> : null}
-      {syncMutation.isError ? <DashboardState tone="error" message={getErrorMessage(syncMutation.error)} /> : null}
 
       <section className="current-baboon-zone">
         {currentBaboonQuery.isLoading ? <DashboardState tone="info" message="Loading current Baboon..." /> : null}
@@ -94,9 +64,7 @@ export function DashboardPage() {
             <Trophy size={42} aria-hidden="true" />
             <div>
               <h2>No Baboon has been crowned yet.</h2>
-              <p>
-                Register at least two friends, play an ARAM: Mayhem match together, then check for new matches.
-              </p>
+              <p>Record your first ARAM: Mayhem game to begin.</p>
             </div>
           </section>
         ) : null}
@@ -106,9 +74,9 @@ export function DashboardPage() {
             <div className="baboon-hero-copy">
               <p className="eyebrow">{hasCoBaboons ? "Current Co-Baboons" : "Current Baboon"}</p>
               <h2>Crowned after dealing the least champion damage.</h2>
-              {current.match ? (
-                <Link className="secondary-action" to={`/matches/${current.match.id}`}>
-                  View the match
+              {current.game ? (
+                <Link className="secondary-action" to={`/games/${current.game.id}`}>
+                  View game
                 </Link>
               ) : null}
             </div>
@@ -125,22 +93,19 @@ export function DashboardPage() {
                   <dl className="baboon-stats">
                     <div>
                       <dt>Champion</dt>
-                      <dd>{baboon.champion_name ?? "Unknown"}</dd>
+                      <dd>
+                        <span className="champion-name">
+                          <ChampionPortrait championName={baboon.champion_name} />
+                          <span>{baboon.champion_name}</span>
+                        </span>
+                      </dd>
                     </div>
                     <div>
                       <dt>Damage</dt>
                       <dd>{formatNumber(baboon.damage_to_champions)}</dd>
                     </div>
-                    <div>
-                      <dt>KDA</dt>
-                      <dd>{formatKda(baboon.kills, baboon.deaths, baboon.assists)}</dd>
-                    </div>
-                    <div>
-                      <dt>Result</dt>
-                      <dd>{baboon.win ? "Win" : "Loss"}</dd>
-                    </div>
                   </dl>
-                  {current.match ? <small>Match ended {formatDateTime(current.match.game_end_time)}</small> : null}
+                  {current.game ? <small>Played {formatDateTime(current.game.played_at)}</small> : null}
                 </article>
               ))}
             </div>
@@ -151,69 +116,31 @@ export function DashboardPage() {
       <section className="surface">
         <div className="section-title">
           <History size={22} aria-hidden="true" />
-          <h2>Latest imported match</h2>
+          <h2>Latest game</h2>
         </div>
 
-        {latestMatchesQuery.isLoading ? <DashboardState tone="info" message="Loading latest match..." /> : null}
-        {latestMatchesQuery.isError ? (
-          <DashboardState tone="error" message={getErrorMessage(latestMatchesQuery.error)} />
+        {latestGamesQuery.isLoading ? <DashboardState tone="info" message="Loading latest game..." /> : null}
+        {latestGamesQuery.isError ? (
+          <DashboardState tone="error" message={getErrorMessage(latestGamesQuery.error)} />
         ) : null}
-        {latestMatchesQuery.isSuccess && !latestMatch ? (
-          <DashboardState tone="empty" message="No imported matches yet." />
+        {latestGamesQuery.isSuccess && !latestGame ? (
+          <DashboardState tone="empty" message="No games have been recorded yet." />
         ) : null}
-        {latestMatch ? (
+        {latestGame ? (
           <div className="latest-match-block">
             <div className="latest-match-meta">
-              <span>{formatDateTime(latestMatch.game_end_time)}</span>
-              <span>{formatDuration(latestMatch.duration_seconds)}</span>
-              <span>{latestMatch.team_won ? "Win" : "Loss"}</span>
+              <span>{formatDateTime(latestGame.played_at)}</span>
+              <span>
+                {latestGame.player_count} player{latestGame.player_count === 1 ? "" : "s"}
+              </span>
+              <span>{formatNumber(latestGame.lowest_damage_to_champions)} lowest damage</span>
             </div>
-            <MatchParticipantsTable participants={latestMatch.participants} />
+            <GameParticipantsTable participants={latestGame.participants} />
           </div>
         ) : null}
       </section>
     </div>
   );
-}
-
-function SyncSummary({ summary }: { summary: MatchSyncSummary }) {
-  const tone = summary.matches_imported > 0 ? "success" : summary.matches_skipped > 0 ? "warning" : "info";
-  return (
-    <section className={`sync-summary ${tone}`}>
-      <AlertCircle size={20} aria-hidden="true" />
-      <div>
-        <strong>{syncSummaryTitle(summary)}</strong>
-        <p>{syncSummaryDetail(summary)}</p>
-      </div>
-    </section>
-  );
-}
-
-function syncSummaryTitle(summary: MatchSyncSummary): string {
-  if (summary.matches_imported > 0) {
-    return `${summary.matches_imported} new match${summary.matches_imported === 1 ? "" : "es"} imported.`;
-  }
-  if (summary.status === "not_enough_friends") {
-    return "At least two friends are needed before syncing.";
-  }
-  if (summary.matches_skipped > 0) {
-    return "Matches were found, but none were eligible.";
-  }
-  return "No new match found.";
-}
-
-function syncSummaryDetail(summary: MatchSyncSummary): string {
-  const skipped = Object.entries(summary.skipped_reasons)
-    .map(([reason, count]) => `${count} ${reason.replace(/_/g, " ")}`)
-    .join(", ");
-
-  if (summary.matches_imported > 0) {
-    return `${summary.friends_checked} friends checked, ${summary.candidate_match_ids} candidates found.`;
-  }
-  if (skipped) {
-    return skipped;
-  }
-  return `${summary.friends_checked} friends checked, ${summary.matches_already_known} matches already known.`;
 }
 
 function DashboardState({ tone, message }: { tone: "error" | "info" | "empty"; message: string }) {

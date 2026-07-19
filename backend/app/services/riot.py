@@ -76,52 +76,6 @@ class RiotAccountService:
             tag_line=canonical_tag_line,
         )
 
-    async def get_match_ids_by_puuid(
-        self,
-        puuid: str,
-        *,
-        queue_id: int,
-        start: int = 0,
-        count: int,
-    ) -> list[str]:
-        safe_start = max(0, start)
-        safe_count = min(max(1, count), 100)
-        encoded_puuid = quote(puuid, safe="")
-        url = (
-            f"https://{self._regional_route}.api.riotgames.com"
-            f"/lol/match/v5/matches/by-puuid/{encoded_puuid}/ids"
-        )
-        payload = await self._get_json(
-            url,
-            params={"queue": str(queue_id), "start": str(safe_start), "count": str(safe_count)},
-            not_found_detail="Riot match history not found.",
-        )
-        if not isinstance(payload, list) or not all(isinstance(match_id, str) for match_id in payload):
-            raise RiotApiError(
-                status.HTTP_502_BAD_GATEWAY,
-                "Riot match ID response was malformed.",
-            )
-        return payload
-
-    async def get_match_details(self, match_id: str) -> dict[str, Any]:
-        encoded_match_id = quote(match_id, safe="")
-        url = (
-            f"https://{self._regional_route}.api.riotgames.com"
-            f"/lol/match/v5/matches/{encoded_match_id}"
-        )
-        payload = await self._get_json(url, not_found_detail="Riot match not found.")
-        if not isinstance(payload, dict):
-            raise RiotApiError(
-                status.HTTP_502_BAD_GATEWAY,
-                "Riot match response was malformed.",
-            )
-        if not isinstance(payload.get("metadata"), dict) or not isinstance(payload.get("info"), dict):
-            raise RiotApiError(
-                status.HTTP_502_BAD_GATEWAY,
-                "Riot match response was malformed.",
-            )
-        return payload
-
     async def _get_json(
         self,
         url: str,

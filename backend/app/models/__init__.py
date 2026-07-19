@@ -1,4 +1,4 @@
 from app.models.friend import Friend
-from app.models.match import Match, MatchParticipant
+from app.models.game import Game, GameParticipant
 
-__all__ = ["Friend", "Match", "MatchParticipant"]
+__all__ = ["Friend", "Game", "GameParticipant"]

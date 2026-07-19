@@ -1,11 +1,12 @@
-import type { MatchParticipant } from "../types/match";
-import { formatKda, formatNumber } from "../utils/format";
+import type { GameParticipant } from "../types/game";
+import { formatNumber } from "../utils/format";
+import { ChampionPortrait } from "./ChampionPortrait";
 
 type Props = {
-  participants: MatchParticipant[];
+  participants: GameParticipant[];
 };
 
-export function MatchParticipantsTable({ participants }: Props) {
+export function GameParticipantsTable({ participants }: Props) {
   const sortedParticipants = [...participants].sort(
     (first, second) => second.damage_to_champions - first.damage_to_champions,
   );
@@ -19,8 +20,6 @@ export function MatchParticipantsTable({ participants }: Props) {
             <th>Player</th>
             <th>Champion</th>
             <th className="numeric">Damage</th>
-            <th className="numeric">K / D / A</th>
-            <th>Result</th>
             <th>Verdict</th>
           </tr>
         </thead>
@@ -30,17 +29,14 @@ export function MatchParticipantsTable({ participants }: Props) {
               <td data-label="Player">
                 <strong>{participant.display_name}</strong>
               </td>
-              <td data-label="Champion">{participant.champion_name ?? "Unknown"}</td>
+              <td data-label="Champion">
+                <span className="champion-name">
+                  <ChampionPortrait championName={participant.champion_name} />
+                  <span>{participant.champion_name}</span>
+                </span>
+              </td>
               <td className="numeric" data-label="Damage">
                 {formatNumber(participant.damage_to_champions)}
-              </td>
-              <td className="numeric" data-label="K / D / A">
-                {formatKda(participant.kills, participant.deaths, participant.assists)}
-              </td>
-              <td data-label="Result">
-                <span className={participant.win ? "result-badge win" : "result-badge loss"}>
-                  {participant.win ? "Win" : "Loss"}
-                </span>
               </td>
               <td data-label="Verdict">
                 <span className={participant.is_baboon ? "verdict-badge baboon" : "verdict-badge safe"}>

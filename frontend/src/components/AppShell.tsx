@@ -1,4 +1,4 @@
-import { Crown, History, Home, Users } from "lucide-react";
+import { Crown, History, Home, PlusCircle, Users } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
 
 export function AppShell() {
@@ -24,9 +24,13 @@ export function AppShell() {
             <Users size={18} aria-hidden="true" />
             <span>Friends</span>
           </NavLink>
-          <NavLink to="/matches" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <NavLink to="/games/new" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <PlusCircle size={18} aria-hidden="true" />
+            <span>Record</span>
+          </NavLink>
+          <NavLink to="/games" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
             <History size={18} aria-hidden="true" />
-            <span>Match History</span>
+            <span>Game History</span>
           </NavLink>
         </nav>
       </header>
