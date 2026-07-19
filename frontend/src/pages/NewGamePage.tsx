@@ -345,7 +345,14 @@ export function NewGamePage() {
                   .map((selectedFriend) => canonicalChampionName(drafts[selectedFriend.id]?.championInput ?? ""))
                   .filter((championName): championName is ChampionName => championName !== null);
                 return (
-                  <div className="participant-entry-row" key={friend.id}>
+                  <div
+                    className={
+                      openChampionFriendId === friend.id
+                        ? "participant-entry-row dropdown-open"
+                        : "participant-entry-row"
+                    }
+                    key={friend.id}
+                  >
                     <div className="participant-name">
                       <strong>{friend.display_name}</strong>
                       <small>

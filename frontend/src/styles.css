@@ -947,12 +947,14 @@ a {
 }
 
 .participant-entry-list {
+  position: relative;
   display: grid;
   gap: 10px;
 }
 
 .participant-entry-row {
   position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(130px, 0.8fr) minmax(190px, 1.1fr) minmax(140px, 0.7fr) 40px;
   gap: 10px;
@@ -962,6 +964,10 @@ a {
   border: 1px solid rgba(52, 65, 82, 0.75);
   border-radius: 8px;
   background: #101823;
+}
+
+.participant-entry-row.dropdown-open {
+  z-index: 50;
 }
 
 .participant-name {
